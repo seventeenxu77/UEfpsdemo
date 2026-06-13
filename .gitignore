@@ -1,0 +1,20 @@
+# ===== Unreal Engine 生成物（本地自动重建，绝不入库）=====
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# ===== Visual Studio / Rider / 构建产物 =====
+.vs/
+.idea/
+*.sln
+*.suo
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+*.user
+
+# ===== 操作系统垃圾 =====
+Thumbs.db
+.DS_Store
