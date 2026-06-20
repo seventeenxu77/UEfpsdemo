@@ -19,7 +19,8 @@ public class mmmfps : ModuleRules
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"UMG",
-			"Slate"
+			"Slate",
+			"Niagara"        // 开火特效(枪口火光/命中粒子)用 Niagara
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

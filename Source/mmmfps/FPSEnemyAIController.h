@@ -27,8 +27,9 @@ protected:
 	/** 决策主循环：追击 or 攻击 */
 	void Think();
 
-	/** 在所有玩家里挑距离本敌人最近、且还活着的那个作目标（联机：服务器枚举全部玩家，不再写死玩家0） */
-	APawn* FindNearestPlayer() const;
+	/** 大乱斗目标选择：在【所有玩家 + 所有其他 AI】里挑距离本敌人最近、还活着的那个作目标。
+	 *  这样 AI 既打玩家也打别的 AI（全员混战）。服务器枚举，返回 AActor*（玩家或敌人都行）。 */
+	AActor* FindNearestTarget() const;
 
 	FTimerHandle ThinkTimer;
 };

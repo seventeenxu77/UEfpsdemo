@@ -9,4 +9,7 @@ void AFPSGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME(AFPSGameState, KillsToWin);
 	DOREPLIFETIME(AFPSGameState, bMatchOver);
 	DOREPLIFETIME(AFPSGameState, WinningPlayer);
+	DOREPLIFETIME(AFPSGameState, WinnerName);
+	DOREPLIFETIME(AFPSGameState, BotKills);
+	DOREPLIFETIME(AFPSGameState, BotDeaths);
 }

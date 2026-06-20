@@ -1,6 +1,8 @@
 #include "FPSGameMode.h"
 #include "FPSGameState.h"
 #include "FPSPlayerState.h"
+#include "FPSEnemy.h"
+#include "FPSGameInstance.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
@@ -13,6 +15,40 @@ AFPSGameMode::AFPSGameMode()
 	// 这样客户端也能拿到比赛状态(胜负)和每个玩家的击杀数。
 	GameStateClass = AFPSGameState::StaticClass();
 	PlayerStateClass = AFPSPlayerState::StaticClass();
+}
+
+FString AFPSGameMode::InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId,
+	const FString& Options, const FString& Portal)
+{
+	// 先让引擎做默认登录处理（注册玩家、设默认名等）
+	const FString Result = Super::InitNewPlayer(NewPlayerController, UniqueId, Options, Portal);
+
+	// 再读连接 URL 里的 ?Name=，有就强制改名——在 Super 之后跑，所以压过引擎默认的电脑名/Player0。
+	const FString DesiredName = UGameplayStatics::ParseOption(Options, TEXT("Name"));
+	if (!DesiredName.IsEmpty())
+	{
+		ChangeName(NewPlayerController, DesiredName, /*bNameChange=*/false);
+	}
+
+	return Result;
+}
+
+void AFPSGameMode::PostLogin(APlayerController* NewPlayer)
+{
+	Super::PostLogin(NewPlayer);
+
+	// 监听服务器房主的登录 URL 往往不带 ?Name=（那是给远程客户端的），所以 InitNewPlayer 改不到它。
+	// 这里专门给【本地玩家】(就是房主自己)用 GameInstance 里存的名字兜底——客户端 IsLocalController()=false，不受影响。
+	if (NewPlayer && NewPlayer->IsLocalController())
+	{
+		if (const UFPSGameInstance* GI = GetWorld()->GetGameInstance<UFPSGameInstance>())
+		{
+			if (!GI->PlayerName.IsEmpty())
+			{
+				ChangeName(NewPlayer, GI->PlayerName, /*bNameChange=*/false);
+			}
+		}
+	}
 }
 
 void AFPSGameMode::BeginPlay()
@@ -64,7 +100,7 @@ void AFPSGameMode::EndGame(bool bWon)
 
 void AFPSGameMode::OnPlayerKilled(AController* Killer, AController* Victim)
 {
-	// 本模式（竞争刷怪）杀玩家不计分——只给受害者记一次死亡，并延时重生让他继续打。
+	// 大乱斗：杀玩家也算分。给凶手记一杀 + 给受害者记死亡 + 延时重生让他继续打。
 	if (!Victim)
 	{
 		return;
@@ -73,8 +109,14 @@ void AFPSGameMode::OnPlayerKilled(AController* Killer, AController* Victim)
 	{
 		if (GS->bMatchOver)
 		{
-			return;   // 比赛结束就不再重生
+			return;   // 比赛已结束：不再计分/重生
 		}
+	}
+
+	// 给凶手记这一杀（排除自杀：没凶手、或凶手就是受害者本人）
+	if (Killer && Killer != Victim)
+	{
+		RegisterKill(Killer);
 	}
 
 	if (AFPSPlayerState* VictimPS = Victim->GetPlayerState<AFPSPlayerState>())
@@ -89,28 +131,56 @@ void AFPSGameMode::OnPlayerKilled(AController* Killer, AController* Victim)
 	GetWorldTimerManager().SetTimer(Handle, Del, RespawnDelay, false);
 }
 
-void AFPSGameMode::OnEnemyKilledBy(AController* KillerController)
+void AFPSGameMode::RegisterKill(AController* Killer)
 {
 	AFPSGameState* GS = Cast<AFPSGameState>(GameState);
-	if (!GS || GS->bMatchOver || !KillerController)
+	if (!GS || GS->bMatchOver || !Killer)
 	{
 		return;   // 没 GameState / 已结束 / 无凶手：不计分
 	}
 
-	// 只有“玩家”才有 AFPSPlayerState；AI 等拿不到，就不会误加分
-	if (AFPSPlayerState* KillerPS = KillerController->GetPlayerState<AFPSPlayerState>())
-	{
-		KillerPS->AddKill();
-		UE_LOG(Logmmmfps, Warning, TEXT("[计分] %s 杀敌 %d/%d"),
-			*KillerPS->GetPlayerName(), KillerPS->Kills, GS->KillsToWin);
+	int32 NewKills = 0;
+	FString KillerName;
 
-		// 达标 → 该玩家胜利、结束比赛（bMatchOver / WinningPlayer 复制给所有客户端）
-		if (KillerPS->Kills >= GS->KillsToWin)
+	// 凶手是【玩家】才有 AFPSPlayerState；AI 控制器拿不到，会落到下面的分支
+	AFPSPlayerState* KillerPS = Killer->GetPlayerState<AFPSPlayerState>();
+	if (KillerPS)
+	{
+		// 玩家：记到自己的 PlayerState（跨重生持久、引擎自动复制）
+		KillerPS->AddKill();
+		NewKills = KillerPS->Kills;
+		KillerName = KillerPS->GetPlayerName();
+	}
+	else if (const AFPSEnemy* KillerBot = Cast<AFPSEnemy>(Killer->GetPawn()))
+	{
+		// AI：记到 GameState 的槽位 BotKills[BotId]（跨重生持久、会复制）
+		const int32 Id = KillerBot->BotId;
+		if (Id < 0)
 		{
-			GS->bMatchOver = true;
-			GS->WinningPlayer = KillerPS;
-			UE_LOG(Logmmmfps, Error, TEXT("[比赛结束] 获胜者：%s"), *KillerPS->GetPlayerName());
+			return;   // 没分配槽位的 AI 不计分
 		}
+		if (GS->BotKills.Num() <= Id)
+		{
+			GS->BotKills.SetNumZeroed(Id + 1);   // 按需扩容到能放下这个槽位
+		}
+		NewKills = ++GS->BotKills[Id];
+		KillerName = FString::Printf(TEXT("Enemy%03d"), Id + 1);   // 和记分板一致：槽位 0 → Enemy001
+	}
+	else
+	{
+		return;   // 既不是玩家也不是 AI：不计分
+	}
+
+	UE_LOG(Logmmmfps, Warning, TEXT("[计分] %s 击杀 %d/%d"), *KillerName, NewKills, GS->KillsToWin);
+
+	// 达标 → 该凶手胜利、结束比赛（复制给所有客户端）。
+	// WinningPlayer 只在“玩家获胜”时非空（HUD 据此判断本机玩家赢没赢）；AI 获胜时为 null，看 WinnerName。
+	if (NewKills >= GS->KillsToWin)
+	{
+		GS->bMatchOver = true;
+		GS->WinningPlayer = KillerPS;   // 玩家赢→非空；AI 赢→nullptr
+		GS->WinnerName = KillerName;
+		UE_LOG(Logmmmfps, Error, TEXT("[比赛结束] 获胜者：%s"), *KillerName);
 	}
 }
 

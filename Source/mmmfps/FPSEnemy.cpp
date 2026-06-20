@@ -9,6 +9,7 @@
 #include "Animation/AnimInstance.h"
 #include "GameFramework/DamageType.h"
 #include "FPSGameMode.h"
+#include "FPSGameState.h"
 #include "Net/UnrealNetwork.h"
 #include "mmmfps.h"
 
@@ -186,10 +187,23 @@ void AFPSEnemy::Die(AController* Killer)
 	// 1) 广播死亡事件（保留：刷怪笼/其他系统可订阅）
 	OnEnemyDeath.Broadcast();
 
-	// 2) 计分：把这一杀记到“凶手玩家”头上（达标则该玩家胜利）
+	// 2) 计分：把这一杀记到“凶手”头上（凶手是玩家→记 PlayerState；是 AI→记 GameState 槽位）
 	if (AFPSGameMode* GM = GetWorld()->GetAuthGameMode<AFPSGameMode>())
 	{
-		GM->OnEnemyKilledBy(Killer);
+		GM->RegisterKill(Killer);
+	}
+
+	// 2.5) 记分板：给这个 AI 自己记一次死亡（按槽位号存进 GameState，会复制给所有人）
+	if (BotId >= 0)
+	{
+		if (AFPSGameState* GS = GetWorld()->GetGameState<AFPSGameState>())
+		{
+			if (GS->BotDeaths.Num() <= BotId)
+			{
+				GS->BotDeaths.SetNumZeroed(BotId + 1);
+			}
+			++GS->BotDeaths[BotId];
+		}
 	}
 
 	// 3) 断开并销毁“大脑”：尸体不需要 AI

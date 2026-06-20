@@ -6,6 +6,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "TimerManager.h"
 #include "mmmfps.h"
 
@@ -33,30 +34,30 @@ void AFPSEnemyAIController::Think()
 		return;
 	}
 
-	// 目标：选距离最近、还活着的玩家（联机：枚举所有玩家，不再写死玩家 0）。
-	// FindNearestPlayer 内部已跳过死亡玩家，所以这里不必再单独判死。
-	APawn* PlayerPawn = FindNearestPlayer();
-	if (!PlayerPawn)
+	// 目标：选距离最近、还活着的【任何人】——玩家或别的 AI（全员混战）。
+	// FindNearestTarget 内部已跳过死亡目标和自己。
+	AActor* Target = FindNearestTarget();
+	if (!Target)
 	{
-		StopMovement();   // 场上没有活着的玩家：原地待命
+		StopMovement();   // 场上没有可打的目标：原地待命
 		return;
 	}
 
-	const float Dist = FVector::Dist(Enemy->GetActorLocation(), PlayerPawn->GetActorLocation());
+	const float Dist = FVector::Dist(Enemy->GetActorLocation(), Target->GetActorLocation());
 
 	if (Dist <= Enemy->AttackRange)
 	{
-		// 贴脸：停下近战，平滑转向玩家
+		// 贴脸：停下近战，平滑转向目标
 		StopMovement();
-		Enemy->SetAimTarget(PlayerPawn);
-		Enemy->TryMeleeAttack(PlayerPawn);
+		Enemy->SetAimTarget(Target);
+		Enemy->TryMeleeAttack(Target);
 	}
 	else if (Dist <= Enemy->ShootRange)
 	{
-		// 中距离：停下开枪，平滑转向玩家，保持距离（不再往前冲）
+		// 中距离：停下开枪，平滑转向目标，保持距离（不再往前冲）
 		StopMovement();
-		Enemy->SetAimTarget(PlayerPawn);
-		Enemy->TryShoot(PlayerPawn);
+		Enemy->SetAimTarget(Target);
+		Enemy->TryShoot(Target);
 	}
 	else
 	{
@@ -69,24 +70,24 @@ void AFPSEnemyAIController::Think()
 		// 清零加速度，导致跑步动画（ShouldMove 需要加速度≠0）失效。
 		if (GetMoveStatus() != EPathFollowingStatus::Moving)
 		{
-			MoveToActor(PlayerPawn, Enemy->ShootRange * 0.8f);
+			MoveToActor(Target, Enemy->ShootRange * 0.8f);
 		}
 	}
 }
 
-APawn* AFPSEnemyAIController::FindNearestPlayer() const
+AActor* AFPSEnemyAIController::FindNearestTarget() const
 {
-	const APawn* MyPawn = GetPawn();
-	if (!MyPawn)
+	const AFPSEnemy* MyEnemy = Cast<AFPSEnemy>(GetPawn());
+	if (!MyEnemy)
 	{
 		return nullptr;
 	}
-	const FVector MyLoc = MyPawn->GetActorLocation();
+	const FVector MyLoc = MyEnemy->GetActorLocation();
 
-	APawn* Nearest = nullptr;
+	AActor* Nearest = nullptr;
 	float NearestDistSq = -1.f;
 
-	// 服务器上枚举所有玩家控制器（AI 在服务器跑，看得到全部玩家）
+	// 1) 所有玩家（枚举玩家控制器，跳过死亡/没附身的）
 	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
 	{
 		const APlayerController* PC = It->Get();
@@ -99,12 +100,11 @@ APawn* AFPSEnemyAIController::FindNearestPlayer() const
 		{
 			continue;   // 没附身（重生间隙）就跳过
 		}
-		// 死了的玩家不追
 		if (const AFPSCharacter* FP = Cast<AFPSCharacter>(P))
 		{
 			if (FP->IsDead())
 			{
-				continue;
+				continue;   // 死了的玩家不追
 			}
 		}
 		const float DistSq = FVector::DistSquared(MyLoc, P->GetActorLocation());
@@ -114,5 +114,22 @@ APawn* AFPSEnemyAIController::FindNearestPlayer() const
 			Nearest = P;
 		}
 	}
+
+	// 2) 所有其他 AI（全员混战：把别的敌人也当目标，跳过自己和死的）
+	for (TActorIterator<AFPSEnemy> It(GetWorld()); It; ++It)
+	{
+		AFPSEnemy* E = *It;
+		if (!E || E == MyEnemy || E->IsDead())
+		{
+			continue;
+		}
+		const float DistSq = FVector::DistSquared(MyLoc, E->GetActorLocation());
+		if (Nearest == nullptr || DistSq < NearestDistSq)
+		{
+			NearestDistSq = DistSq;
+			Nearest = E;
+		}
+	}
+
 	return Nearest;
 }

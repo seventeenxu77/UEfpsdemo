@@ -22,6 +22,10 @@ class MMMFPS_API AFPSEnemy : public ACharacter
 public:
 	AFPSEnemy();
 
+	/** AI 槽位号：由刷怪笼分配（0,1,2…）。它的击杀数按这个号存在 GameState.BotKills 里——
+	 *  死了重生还是同一个号，分数接着累加。-1 = 没分配（不参与计分）。仅服务器使用。 */
+	int32 BotId = -1;
+
 	/** 最大血量。玩家一枪 20，默认 5 枪打死 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy|Health")
 	float MaxHP = 100.f;

@@ -11,6 +11,8 @@
 class UInputAction;
 class USkeletalMeshComponent;
 class UAnimMontage;
+class UNiagaraSystem;
+class USoundBase;
 
 UCLASS()
 class MMMFPS_API AFPSCharacter : public AmmmfpsCharacter
@@ -34,6 +36,10 @@ protected:
 	/** 切换单发/全自动：建议绑 V 键（可选，不绑就保持默认模式） */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|Input")
 	UInputAction* ToggleFireModeAction;
+
+	/** 瞄准(ADS)输入：建议绑鼠标右键。按住举枪缩放 + 更准；松开恢复 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|Input")
+	UInputAction* AimAction;
 
 	// ---------- 武器数值（可在编辑器调） ----------
 
@@ -79,6 +85,36 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|Recoil")
 	float SpreadRecoveryPerSec = 8.f;
 
+	// ---------- 瞄准 (ADS) ----------
+
+	/** 举枪时的相机视场角(度)。比默认小 = 放大，越小放大越多 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|Aim")
+	float AimFOV = 50.f;
+
+	/** 举枪/放下的缩放过渡速度（越大越跟手） */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|Aim")
+	float AimInterpSpeed = 12.f;
+
+	/** 举枪时散布缩小到原来的比例（0.3 = 精度提升约三倍） */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|Aim")
+	float AimSpreadMultiplier = 0.3f;
+
+	/** 举枪时枪上瞄准点停在【相机前方】多远（厘米）。太小→枪怼到眼前、手被拉到脸上；太大→枪伸太远。
+	 *  视线轴上的点都落在准星中心，所以改这个不影响"对准准星"，只改枪离脸的远近。可在 BP / 运行时调。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|Aim")
+	float AimForwardOffset = 40.f;
+
+	/** 瞄准方向参考插槽：代码用 (此插槽位置 − AimSocket位置) 当"瞄准基线方向"。
+	 *  在枪的【前准星】上建个插槽(如 FrontSight)、与 AimSocket(照门)【同一高度】，瞄准时三点(照门-前准星-准星)才共线。
+	 *  找不到此插槽时回退用 Muzzle(枪口，因低于瞄准线会略带俯视)。Muzzle 因此可安心留在枪眼做枪口火光。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|Aim")
+	FName AimDirSocketName = "FrontSight";
+
+	/** 调试可视化：在世界里画出 瞄准目标点(绿)/实际AimSocket(红)/瞄准方向(品红)/视线轴(黄)，
+	 *  用来一眼判断"位置对齐没、瞄准线平不平行视线"。调好后在 BP 关掉。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|Aim")
+	bool bShowAimDebug = true;
+
 	// ---------- 武器外观 / 动画 ----------
 
 	/** 第一人称手里的枪模型（挂在手臂上、只有自己看得见）。在 BP 里设 SKM_Rifle + 手部插槽 */
@@ -107,6 +143,40 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|Anim")
 	UAnimMontage* HitReactMontage;
 
+	// ---------- 开火特效 (FX) ----------
+
+	/** 枪口火光粒子（可选）。在 BP 指定 Niagara 系统；贴在枪口 MuzzleSocketName 插槽上播放。不填则只有下面的闪光灯。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|FX")
+	UNiagaraSystem* MuzzleFlashFX = nullptr;
+
+	/** 命中特效粒子（可选）。在 BP 指定 Niagara 系统；在子弹命中点播放。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|FX")
+	UNiagaraSystem* ImpactFX = nullptr;
+
+	/** 枪声（可选）。在 BP 指定音效；在枪口播放。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|FX")
+	USoundBase* FireSound = nullptr;
+
+	/** 枪口插槽名（火光/枪声/闪光灯都挂这里）。默认 Muzzle——它一直留在真实枪口，不参与瞄准。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|FX")
+	FName MuzzleSocketName = "Muzzle";
+
+	/** 枪口闪光灯强度（瞬时点光源，无需任何素材、永远有效）。设 0 可关闭闪光灯。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|FX")
+	float MuzzleFlashLightIntensity = 5000.f;
+
+	/** 枪口闪光灯颜色（暖橙色，模拟火药燃烧）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|FX")
+	FColor MuzzleFlashLightColor = FColor(255, 170, 70);
+
+	/** 枪口闪光灯衰减半径（厘米，照亮多大范围）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|FX")
+	float MuzzleFlashLightRadius = 300.f;
+
+	/** 枪口闪光灯持续时间（秒）。一闪即灭，太长会显得发光不真实。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|FX")
+	float MuzzleFlashLightTime = 0.05f;
+
 	/** 玩家最大血量 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPS|Health")
 	float MaxHP = 100.f;
@@ -119,6 +189,9 @@ protected:
 
 	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+
+	/** 每帧把相机 FOV 平滑插值到（举枪→AimFOV / 放下→DefaultFOV），做出缩放过渡 */
+	virtual void Tick(float DeltaSeconds) override;
 
 	// ---------- 开火流程 ----------
 
@@ -140,6 +213,10 @@ protected:
 	/** 切换单发/全自动 */
 	void ToggleFireMode();
 
+	/** 举枪 / 放下（ADS）：右键按下/松开触发，改变 bIsAiming，Tick 据此缩放 FOV */
+	void StartAiming();
+	void StopAiming();
+
 	// ---------- 联机：服务器权威开火 / 受击 / 死亡 ----------
 
 	/** 开火 RPC：客户端把“射线起点 + 方向”上报服务器，由服务器做权威射线判定与伤害。
@@ -147,9 +224,14 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void Server_Fire(FVector Start, FVector ShotDir);
 
-	/** 开火表现广播：所有客户端播这个角色第三人称身体的开火动画（让别人看到你在射击）。 */
+	/** 开火表现广播：所有客户端播第三人称身体开火动画 + 枪口火光/闪光/枪声 +（命中则）命中特效。
+	 *  HitLocation=命中点(没中则是射线终点)，bHit=这一枪是否命中(决定要不要播命中特效)。 */
 	UFUNCTION(NetMulticast, Unreliable)
-	void Multicast_PlayFireFX();
+	void Multicast_PlayFireFX(FVector HitLocation, bool bHit);
+
+	/** 在枪口播放：火光粒子(若指定) + 瞬时闪光灯(永远有效) + 枪声(若指定)。
+	 *  本机玩家挂在第一人称枪、其他客户端挂在第三人称枪——各自看得见自己该看的那把。 */
+	void PlayMuzzleFlash();
 
 	/** 受击表现广播：所有客户端都播这个角色的受击动画；仅受害者本人触发屏幕红屏。
 	 *  NetMulticast=服务器调用、所有端各自执行。 */
@@ -178,6 +260,42 @@ protected:
 
 	/** 当前累积扩散（度）：连发增大、停火恢复 */
 	float CurrentSpreadDegrees = 0.f;
+
+	/** 是否正在瞄准(ADS)：右键按住时为 true。
+	 *  BlueprintReadOnly → FP 动画蓝图能读它，按它混合到"举枪瞄准"姿势（枪抬到准星中心）。
+	 *  仅本地有效（右键只在本地玩家触发）；要让别人也看到你举枪需另做复制，暂不做。 */
+	UPROPERTY(BlueprintReadOnly, Category = "FPS|Aim")
+	bool bIsAiming = false;
+
+	/** 默认视场角：BeginPlay 时从相机读取，放下瞄准时恢复到它 */
+	float DefaultFOV = 90.f;
+
+	/** 举枪混合系数(0=放下、1=举到准星)。每帧朝 bIsAiming 用 AimInterpSpeed 平滑插值——和 FOV 缩放同速同步。
+	 *  动画蓝图把它接到 ModifyBone / TwoBoneIK 的 Alpha：右键→平滑抬枪、松开→平滑放下，不再是常开/突变。 */
+	UPROPERTY(BlueprintReadOnly, Category = "FPS|Aim")
+	float AimAlpha = 0.f;
+
+	// ---------- ADS 程序化瞄准：给 FP 动画蓝图的 IK 用的两个目标值（每帧 Tick 算好，本地玩家） ----------
+
+	/** 瞄准时 ik_hand_gun 该移到的世界位置 = 手(hand_r)位置 + (相机位置 − 枪上 AimSocket 位置)。
+	 *  把枪的瞄准点 AimSocket 拽回相机视线上 → 枪对准准星。BlueprintReadOnly：FP 动画蓝图读它喂 Modify Bone 的平移。 */
+	UPROPERTY(BlueprintReadOnly, Category = "FPS|Aim")
+	FVector ADSSocketLoc = FVector::ZeroVector;
+
+	/** 瞄准时 hand_r 该转成的世界旋转。注意：不是"相机旋转"，而是"相机旋转 × HandToAim⁻¹"——
+	 *  目标是让【枪上 AimSocket 的朝向】对齐相机，而不是把手腕骨硬掰到和相机同朝向(那会拧成麻花)。
+	 *  BlueprintReadOnly：FP 动画蓝图读它喂 Modify Bone 的旋转。 */
+	UPROPERTY(BlueprintReadOnly, Category = "FPS|Aim")
+	FRotator ADSSocketRot = FRotator::ZeroRotator;
+
+	/** 缓存：枪的"枪坐标系"(X=枪管前向、Z=枪上方)相对 hand_r 局部坐标系的旋转。枪刚性挂手上 → 此值是【常量】。
+	 *  枪管前向用 Muzzle 与 AimSocket 两插槽的【位置差】算(与插槽自身朝向无关，最稳)；枪上方用 AimSocket 的 Z 轴。
+	 *  瞄准时拿它把"枪管对齐相机前方、枪保持竖直"，不再依赖 AimSocket 的 X 轴朝向。 */
+	FQuat ADSGunBasisLocal = FQuat::Identity;
+	/** 缓存：AimSocket 在 hand_r 局部坐标系中的位置(常量，枪刚性挂手上)。位置前馈用——
+	 *  先算好这一帧的旋转，再直接反推手该在的位置，使 AimSocket 精确落在目标点，无滞后。 */
+	FVector ADSAimOffsetLocal = FVector::ZeroVector;
+	bool bADSGunBasisCached = false;
 
 	/** 上次开火的游戏时间，用于射速限制与扩散恢复计算 */
 	float LastFireTime = -999.f;

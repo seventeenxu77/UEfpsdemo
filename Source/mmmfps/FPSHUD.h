@@ -48,4 +48,7 @@ public:
 private:
 	/** 受击红屏当前强度（0~1）：被打设 1，每帧渐隐到 0 */
 	float DamageFlashAlpha = 0.f;
+
+	/** 画记分板（玩家 + 所有 AI 的击杀/死亡，按击杀排序）。按住 Tab 时调用。 */
+	void DrawScoreboard(class AFPSGameState* GS);
 };
