@@ -25,6 +25,9 @@ FString AFPSGameMode::InitNewPlayer(APlayerController* NewPlayerController, cons
 
 	// 再读连接 URL 里的 ?Name=，有就强制改名——在 Super 之后跑，所以压过引擎默认的电脑名/Player0。
 	const FString DesiredName = UGameplayStatics::ParseOption(Options, TEXT("Name"));
+	// 诊断：把"连接 URL 带来的选项"和"解析出的名字"打出来——客户端名字若仍不对，看这行就知道是 URL 没带过来、
+	// 还是带过来了却被后续覆盖（被覆盖的话，pawn BeginPlay 里的 Server_SetPlayerName 兜底会再纠正）。
+	UE_LOG(Logmmmfps, Warning, TEXT("[名字] InitNewPlayer：连接URL选项「%s」→ 解析出 Name=「%s」"), *Options, *DesiredName);
 	if (!DesiredName.IsEmpty())
 	{
 		ChangeName(NewPlayerController, DesiredName, /*bNameChange=*/false);

@@ -224,6 +224,14 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void Server_Fire(FVector Start, FVector ShotDir);
 
+	/** 客户端→服务器上报玩家自选名字：进游戏(本 pawn 的 BeginPlay)后由本地玩家调用，
+	 *  把 GameInstance 里存的名字告诉服务器，由服务器 ChangeName 设到 PlayerState、再复制给所有人。
+	 *  为什么不只靠连接 URL 的 ?Name=：登录握手期间引擎会用【在线子系统昵称】(没接在线服务时=电脑用户名)
+	 *  覆盖 PlayerState 名字，时机比 ?Name= 晚 → 把自选名顶掉、显示成电脑名。改在 pawn 生成后(BeginPlay)上报，
+	 *  此调用跑在握手之后 → 不会再被覆盖，名字稳定生效。Server=只在服务器执行；Reliable=可靠送达。 */
+	UFUNCTION(Server, Reliable)
+	void Server_SetPlayerName(const FString& NewName);
+
 	/** 开火表现广播：所有客户端播第三人称身体开火动画 + 枪口火光/闪光/枪声 +（命中则）命中特效。
 	 *  HitLocation=命中点(没中则是射线终点)，bHit=这一枪是否命中(决定要不要播命中特效)。 */
 	UFUNCTION(NetMulticast, Unreliable)

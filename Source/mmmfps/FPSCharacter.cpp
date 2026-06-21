@@ -12,6 +12,8 @@
 #include "TimerManager.h"
 #include "FPSHUD.h"
 #include "FPSGameMode.h"
+#include "FPSGameInstance.h"
+#include "GameFramework/PlayerState.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PointLightComponent.h"
@@ -82,6 +84,47 @@ void AFPSCharacter::BeginPlay()
 			PC->bShowMouseCursor = false;
 			PC->SetInputMode(FInputModeGameOnly());
 		}
+
+		// 本地玩家：把自己在主菜单选的名字上报服务器，设到 PlayerState（再复制给所有人，记分板/击杀提示才显示自选名）。
+		// 名字存在 GameInstance——它跨关卡切换不销毁，所以"加入并切到游戏关卡"之后这里仍读得到自己选的名。
+		// 关键：放在 pawn 的 BeginPlay（此时登录握手已结束）上报，能压过引擎握手期间写进去的电脑名 → 名字才稳定生效。
+		if (const UFPSGameInstance* GI = GetGameInstance<UFPSGameInstance>())
+		{
+			if (!GI->PlayerName.IsEmpty())
+			{
+				Server_SetPlayerName(GI->PlayerName);
+			}
+		}
+	}
+}
+
+void AFPSCharacter::Server_SetPlayerName_Implementation(const FString& NewName)
+{
+	// —— 运行在服务器 ——
+	// 清洗 + 限长（客户端上报的内容不可全信，服务器再夹一道：去首尾空白、最多 16 字）。
+	FString Clean = NewName;
+	Clean.TrimStartAndEndInline();
+	Clean = Clean.Left(16);
+	if (Clean.IsEmpty())
+	{
+		return;
+	}
+
+	// 优先走 GameMode 的官方改名通道 ChangeName（它内部会 SetPlayerName 并走通知流程，最规范）；
+	// 万一拿不到 GameMode，就直接设 PlayerState 兜底。设到的是【服务器端】PlayerState → 引擎自动把名字复制给所有客户端。
+	if (AController* C = GetController())
+	{
+		if (AGameModeBase* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AGameModeBase>() : nullptr)
+		{
+			GM->ChangeName(C, Clean, /*bNameChange=*/false);
+			UE_LOG(Logmmmfps, Warning, TEXT("[名字] 收到客户端上报，经 GameMode 设为「%s」"), *Clean);
+			return;
+		}
+	}
+	if (APlayerState* PS = GetPlayerState())
+	{
+		PS->SetPlayerName(Clean);
+		UE_LOG(Logmmmfps, Warning, TEXT("[名字] 收到客户端上报，直设 PlayerState 为「%s」"), *Clean);
 	}
 }
 
